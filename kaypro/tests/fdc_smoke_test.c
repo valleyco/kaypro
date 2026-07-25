@@ -2,11 +2,16 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "kaypro.h"
 #include "kaypro_host.h"
 #include "kaypro_internal.h"
 #include "fdc1793.h"
+
+#define KAYPRO_SSDD_SIZE 204800u
+#define KAYPRO_DSDD_SIZE 409600u
 
 #define PORT_FDC_STATUS 0x10
 #define PORT_FDC_COMMAND 0x10
@@ -98,6 +103,62 @@ int main(void) {
   assert((status & 0x04) != 0); /* Track0 in Type I status */
 
   kaypro_destroy(m);
+
+  /* SSDD: side 0 is readable; side 1 must not alias into later tracks. */
+  {
+    kaypro_t *ss = kaypro_create();
+    assert(ss);
+    uint8_t *img = (uint8_t *)calloc(1, KAYPRO_SSDD_SIZE);
+    assert(img);
+    img[0] = 0xA5;
+    img[1] = 0x5A;
+    /* Track 1 side 0 starts at 10*512 — must not be read as side 1. */
+    img[10 * 512] = 0x11;
+    assert(kaypro_attach_disk_mem(ss, 0, img, KAYPRO_SSDD_SIZE));
+
+    write_port(ss, PORT_SYSPORT, 0xB6); /* drive A, side 0 */
+    write_port(ss, PORT_FDC_COMMAND, 0x00);
+    expect_and_clear_nmi(ss);
+
+    uint8_t got[2];
+    read_sector_bytes(ss, 0x00, got, sizeof(got), NULL, 0);
+    assert(got[0] == 0xA5 && got[1] == 0x5A);
+
+    /* Side 1 select (sysport bit2 clear) on SSDD → not ready. */
+    write_port(ss, PORT_SYSPORT, 0xB2);
+    write_port(ss, PORT_FDC_TRACK, 0x00);
+    write_port(ss, PORT_FDC_SECTOR, 0x00);
+    write_port(ss, PORT_FDC_COMMAND, 0x80);
+    expect_and_clear_nmi(ss);
+    status = read_port(ss, PORT_FDC_STATUS);
+    assert((status & 0x80) != 0); /* not ready */
+    assert((status & 0x01) == 0); /* not busy */
+
+    uint8_t *bad = (uint8_t *)malloc(100);
+    assert(bad);
+    assert(!kaypro_attach_disk_mem(ss, 0, bad, 100));
+    free(bad);
+
+    kaypro_destroy(ss);
+  }
+
+  /* Reject wrong size; accept DSDD size constant used above via file. */
+  {
+    kaypro_t *ds = kaypro_create();
+    assert(ds);
+    uint8_t *img = (uint8_t *)calloc(1, KAYPRO_DSDD_SIZE);
+    assert(img);
+    img[0] = 0x22;
+    assert(kaypro_attach_disk_mem(ds, 0, img, KAYPRO_DSDD_SIZE));
+    write_port(ds, PORT_SYSPORT, 0xB6);
+    write_port(ds, PORT_FDC_COMMAND, 0x00);
+    expect_and_clear_nmi(ds);
+    uint8_t got[1];
+    read_sector_bytes(ds, 0x00, got, 1, NULL, 0);
+    assert(got[0] == 0x22);
+    kaypro_destroy(ds);
+  }
+
   printf("kaypro fdc smoke: ok\n");
   return 0;
 }

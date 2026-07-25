@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -10,15 +11,17 @@
 #define FDC_TRACK0 0x04
 #define FDC_NOT_READY 0x80
 
-/* Kaypro DSDD: 10 x 512-byte sectors/side (IDs 0-9 / 10-19). */
+/* Kaypro SSDD 40×1×10×512; DSDD 40×2×10×512 (side-1 IDs 10–19). */
 #define KAYPRO_TRACKS 40
-#define KAYPRO_SIDES 2
 #define KAYPRO_SPT 10
 #define KAYPRO_SSIZE 512
+#define KAYPRO_SSDD_SIZE ((size_t)KAYPRO_TRACKS * 1 * KAYPRO_SPT * KAYPRO_SSIZE)
+#define KAYPRO_DSDD_SIZE ((size_t)KAYPRO_TRACKS * 2 * KAYPRO_SPT * KAYPRO_SSIZE)
 
 typedef struct {
   uint8_t *data;
   size_t size;
+  unsigned sides; /* 1 = SSDD, 2 = DSDD */
 } fdc_disk_t;
 
 typedef struct {
@@ -53,21 +56,26 @@ static bool fdc_drive_ready(const fdc_impl_t *fdc) {
   return disk->data != NULL;
 }
 
-static size_t fdc_sector_offset(const fdc_impl_t *fdc) {
+static bool fdc_sector_offset(const fdc_impl_t *fdc, size_t *out) {
+  const fdc_disk_t *disk = &fdc->drives[fdc->selected_drive];
+  unsigned sides = disk->sides;
   unsigned track = fdc->track;
   unsigned side = fdc->side;
   unsigned sector = fdc->sector;
   unsigned phys;
+
+  if (sides == 0 || side >= sides) return false;
+
   /* Side 0: IDs 0-9; side 1: IDs 10-19 (GETBUF dset2 adds 10). */
-  if (sector >= 10)
+  if (sides > 1 && sector >= 10)
     phys = sector - 10;
   else
     phys = sector;
   if (phys >= KAYPRO_SPT) phys = KAYPRO_SPT - 1;
   if (track >= KAYPRO_TRACKS) track = KAYPRO_TRACKS - 1;
-  if (side >= KAYPRO_SIDES) side = KAYPRO_SIDES - 1;
-  return ((size_t)track * KAYPRO_SIDES + side) * KAYPRO_SPT * KAYPRO_SSIZE +
+  *out = ((size_t)track * sides + side) * KAYPRO_SPT * KAYPRO_SSIZE +
          phys * KAYPRO_SSIZE;
+  return true;
 }
 
 static void fdc_finish_type1(fdc_impl_t *fdc) {
@@ -82,8 +90,9 @@ static void fdc_finish_type1(fdc_impl_t *fdc) {
 
 static void fdc_begin_read_address(fdc_impl_t *fdc) {
   /* WD1793 Read Address: 6-byte ID field. */
+  const fdc_disk_t *disk = &fdc->drives[fdc->selected_drive];
   uint8_t id_sec = fdc->sector;
-  if (fdc->side == 1 && id_sec < 10)
+  if (disk->sides > 1 && fdc->side == 1 && id_sec < 10)
     id_sec = (uint8_t)(id_sec + 10);
   fdc->sector_buf[0] = fdc->track;
   fdc->sector_buf[1] = fdc->side;
@@ -103,16 +112,9 @@ static void fdc_begin_read_address(fdc_impl_t *fdc) {
 
 static void fdc_begin_read_sector(fdc_impl_t *fdc) {
   fdc_disk_t *disk = &fdc->drives[fdc->selected_drive];
+  size_t off = 0;
   fdc->type1_status = false;
-  if (!disk->data) {
-    fdc->busy = false;
-    fdc->drq = false;
-    fdc->status = FDC_NOT_READY;
-    fdc->needs_nmi = true;
-    return;
-  }
-  size_t off = fdc_sector_offset(fdc);
-  if (off + 512 > disk->size) {
+  if (!disk->data || !fdc_sector_offset(fdc, &off) || off + 512 > disk->size) {
     fdc->busy = false;
     fdc->drq = false;
     fdc->status = FDC_NOT_READY;
@@ -130,8 +132,9 @@ static void fdc_begin_read_sector(fdc_impl_t *fdc) {
 }
 
 static void fdc_begin_write_sector(fdc_impl_t *fdc) {
+  size_t off = 0;
   fdc->type1_status = false;
-  if (!fdc_drive_ready(fdc)) {
+  if (!fdc_drive_ready(fdc) || !fdc_sector_offset(fdc, &off)) {
     fdc->busy = false;
     fdc->drq = false;
     fdc->status = FDC_NOT_READY;
@@ -149,11 +152,9 @@ static void fdc_begin_write_sector(fdc_impl_t *fdc) {
 
 static void fdc_finish_write_sector(fdc_impl_t *fdc) {
   fdc_disk_t *disk = &fdc->drives[fdc->selected_drive];
-  if (disk->data) {
-    size_t off = fdc_sector_offset(fdc);
-    if (off + 512 <= disk->size) {
-      memcpy(disk->data + off, fdc->sector_buf, 512);
-    }
+  size_t off = 0;
+  if (disk->data && fdc_sector_offset(fdc, &off) && off + 512 <= disk->size) {
+    memcpy(disk->data + off, fdc->sector_buf, 512);
   }
   fdc->drq = false;
   fdc->busy = false;
@@ -325,11 +326,23 @@ void fdc1793_set_sysport(kaypro_fdc_t *fdc, uint8_t sysport) {
 }
 
 bool kaypro_fdc_attach_mem(kaypro_fdc_t *fdc, int drive, uint8_t *data, size_t size) {
+  unsigned sides;
   if (drive < 0 || drive > 1 || !data || size == 0) return false;
+  if (size == KAYPRO_SSDD_SIZE) {
+    sides = 1;
+  } else if (size == KAYPRO_DSDD_SIZE) {
+    sides = 2;
+  } else {
+    fprintf(stderr,
+            "Unsupported disk image size %zu (need %zu SSDD or %zu DSDD)\n",
+            size, KAYPRO_SSDD_SIZE, KAYPRO_DSDD_SIZE);
+    return false;
+  }
   fdc_disk_t *disk = &fdc_impl(fdc)->drives[drive];
   free(disk->data);
   disk->data = data;
   disk->size = size;
+  disk->sides = sides;
   return true;
 }
 
