@@ -81,6 +81,11 @@ bool kaypro_attach_disk_mem(kaypro_t *m, int drive, uint8_t *data, size_t size) 
   return kaypro_fdc_attach_mem(m->fdc, drive, data, size);
 }
 
+void kaypro_mark_display_dirty(kaypro_t *m) {
+  if (!m || !m->crt) return;
+  kaypro_crt_mark_dirty(m->crt);
+}
+
 void kaypro_reset(kaypro_t *m) {
   for (int i = 0; i < m->device_count; i++) {
     EmuDevice *dev = m->devices[i];

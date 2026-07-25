@@ -30,8 +30,16 @@ void kaypro_set_host(kaypro_t *m, const kaypro_host_ops_t *ops);
 bool kaypro_load_rom(kaypro_t *m, const char *path);
 bool kaypro_attach_disk(kaypro_t *m, int drive, const char *path);
 
+/* Optional POSIX host display chrome. NULL cfg (or NULL fields) = defaults. */
+typedef struct kaypro_host_posix_cfg {
+  /* Named ANSI color, #RRGGBB, or "none"/"off". Default: green. */
+  const char *border_color;
+  /* Directory of .dsk images for host menu Select drive. NULL = unavailable. */
+  const char *images_dir;
+} kaypro_host_posix_cfg_t;
+
 /* Install stdin/stdout/stderr console + log ops for desktop runs. */
-void kaypro_host_posix_install(kaypro_t *m);
+void kaypro_host_posix_install(kaypro_t *m, const kaypro_host_posix_cfg_t *cfg);
 /* True after the host quit key (Ctrl-\) is pressed. */
 bool kaypro_host_posix_quit_requested(void);
 

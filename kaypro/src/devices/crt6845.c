@@ -165,6 +165,11 @@ void kaypro_crt_clear_dirty(kaypro_crt_t *crt) {
   ((crt_impl_t *)crt)->dirty = false;
 }
 
+void kaypro_crt_mark_dirty(kaypro_crt_t *crt) {
+  if (!crt) return;
+  ((crt_impl_t *)crt)->dirty = true;
+}
+
 kaypro_crt_t *kaypro_crt_create(void) {
   crt_impl_t *crt = (crt_impl_t *)calloc(1, sizeof(crt_impl_t));
   if (!crt) return NULL;

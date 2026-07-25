@@ -29,5 +29,6 @@ unsigned kaypro_crt_rows(void);
 void kaypro_crt_cursor(const kaypro_crt_t *crt, unsigned *col, unsigned *row);
 bool kaypro_crt_is_dirty(const kaypro_crt_t *crt);
 void kaypro_crt_clear_dirty(kaypro_crt_t *crt);
+void kaypro_crt_mark_dirty(kaypro_crt_t *crt);
 
 #endif /* KAYPRO_CRT6845_H */

@@ -23,6 +23,9 @@ void kaypro_reset(kaypro_t *m);
 void kaypro_step(kaypro_t *m, unsigned m_cycles);
 void kaypro_run(kaypro_t *m);
 
+/* Force the next kaypro_step to refresh the host display from CRT cells. */
+void kaypro_mark_display_dirty(kaypro_t *m);
+
 void kaypro_set_trace_io(kaypro_t *m, bool enable);
 
 uint8_t kaypro_mem_read(kaypro_t *m, uint16_t addr);
