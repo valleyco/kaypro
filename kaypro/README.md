@@ -133,6 +133,9 @@ Universal). `ii` is a convenience preset, not a full ’83 video/port map.
 | `src/devices/` | sysport, SIO, FDC1793, keyboard, CRT (SY6545 VRAM), HDC stub |
 | `src/host/kaypro_host.h` | Host ops + path-loader declarations |
 | `src/host/posix/` | Desktop CLI, stdin/stdout, file loaders, ANSI CRT dump |
+| `docs/ports.md` | II-era I/O port index (see note on Universal vs II maps) |
+| `docs/device-ports/` | Per-device hardware notes from early BIOS/ROM |
+| `docs/kii4tkit/` | Original Kaypro II / KPIV assembly sources (reference) |
 | `tests/smoke_test.c` | Bank-1 ROM read regression |
 | `tests/crt_smoke_test.c` | SY6545 ports + 80×25 cell buffer / cursor |
 | `tests/hdc_smoke_test.c` | WD1002 absent-controller fail-fast |

@@ -1,0 +1,16 @@
+smsg1:	defw	crlf, crlf
+	defb	'Format a single track of the diskette'
+	defw	crlf
+	defb	'Enter track number (<ESC> key to abort)  xx', 8,8,'$'
+
+smsg2:	defw	crlf
+smsg4:	defb	return, 'Formatting track:$'
+
+smsg3:	defb	' Press RETURN key to format, any other key to abort $'
+
+secmsg: defb    ' Sector ','$'
+
+
+newline:defw	crlf
+	defb	'$'
+

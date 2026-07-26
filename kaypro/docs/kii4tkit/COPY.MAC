@@ -1,0 +1,923 @@
+title Diskette copy/format program. Copyright (C) 1983 By NLS Inc.
+;###############################################################
+;##                                                           ##
+;##       High speed diskette copy program                    ##
+;##                                                           ##
+;##       By G. Ohnysty                                       ##
+;##                                                           ##
+;##       Copyright (C) 1983 by Non-Linear Systems, Inc.      ##
+;##       No warranty is made, expressed, or implied.         ##
+;##                                                           ##
+;###############################################################
+;##       Last Update:07/20/83            [02]                ##
+;###############################################################
+; see copy.msg for version #
+
+	public	vertrk, trkcnt,	bdos, tellbad,	prnt,	diskon
+	extrn	maktrk,	frmtrk,	format,	single, forma
+	cseg
+	.z80
+false	equ	0
+true	equ	not false
+doubl	equ	false	; true if double sided 48tpi drives; false ss/48tpi
+	if doubl
+		maxtrk	equ	80	; tracks/disk
+	    else
+		maxtrk	equ	40	; tracks/disk
+	    endif
+tries1	equ	6
+tries2	equ	2
+maxsec	equ	10		; sectors/track
+cmnd	equ	10H		; command port
+data	equ	13H		; data port
+secp	equ	12H		; sector port
+trkp	equ	11H		; track port
+status	equ	10H		; status port
+rdcmd	equ	88H		; read sector command
+rdadr	equ	0C0H		; read address
+adrmsk	equ	9EH		; read address status mask
+rdmask	equ	9CH		; read status mask
+wrtcmd	equ	0A8H		; write sector command
+wrtmask	equ	0FCH		; write status mask
+ficmd	equ	0D0H		; force int command
+seekcmd	equ	10H		; seek command
+rstcmd	equ	00		; home command
+bitport	equ	1CH		; system bit port
+cr	equ	0DH		; ascii return
+lf	equ	0AH		; ascii line feed
+cpm	equ	5		; bdos entry point
+
+; print a message
+print	macro	x
+	.xlist
+	ld	hl,x
+	call	prnt
+	.list
+	endm
+
+; get a char from console, up case
+input	macro
+	.xlist
+	ld	c,1
+	call	5
+	res	5,a
+	.list
+	endm
+
+; cond. jump on char
+jmpif	macro	x, y
+	.xlist
+	cp	x
+	jp	z,y
+	.list
+	endm
+
+; prompt user for cr or abort
+prompt	macro	x
+	.xlist
+	local ok
+	print	clear
+	print	x
+	input
+	.xlist
+	cp	cr
+	jr	z,ok
+	print	clear
+	.xlist
+	ret
+ok:	print	crlf
+	endm
+
+	ld	sp,stack	; set stack
+	ld	a,(66H)		; get and save byte at nmi
+	ex	af,af'
+	ld	a,0C9H		; RET op code
+	ld	(66H),a
+	call	getsys		; get a system image
+	print	signon		; say hello
+ask:	ld	sp,stack	; set stack
+	ld	a,true		; set error message flag
+	ld	(msgflg),a
+	ld	a,tries1
+	ld	(tries),a
+	ld	hl,ask		; return to ask
+	push	hl
+	print	menu1
+	input			; get a character
+	jmpif	'C', copy	; format, copy verify, and sysgen
+	jmpif	'B', blank	; make a blank diskette
+	jmpif	'O', other	; other menu options
+	cp	'E'
+	jr	nz,ask
+exit:	ex	af,af'
+	ld	(66H),a		; restore byte at nmi vector
+	jp	0		; back to OS
+
+other:	ld	a,false		; set error message flag
+	ld	(msgflg),a
+	print	menu2		; second menu
+	input
+	jmpif	'C', copy	; format, copy verify, and sysgen
+	jmpif	'I', image	; format, copy and verify
+	jmpif	'D', dup	; copy and verify
+	jmpif	'V', verify	; verify A & B same
+	jmpif	'S', sysgen	; put system on B
+	jmpif	'F', blankb	; format a diskette in B
+	jmpif	'T', blankt	; format a single track
+	jmpif	'B', blank	; make a blank diskette (format, sysgen)
+	jmpif	'X', blanka	; format drive A:
+	jmpif	'E', exit	; exit program
+	print	clear
+	jp	ask		; bad input
+
+getsys:	call	diskon		; turn on disk drive
+	call	home
+	xor	a
+	ld	(track),a	; on track 0
+	ld	hl,sysimag	; place to store system image
+	ld	(dmaadr),hl	; set dma address
+	ld	hl,tran		; sector xlate table
+	ld	c,10		; number of sectors to read
+get1:	ld	a,(hl)		; sector to read
+	push	bc		; # of sectors
+	push	hl		; save pos in tran
+	out	(secp),a	; set sector number
+	call	read		; read sector
+	call	nz,tellbad	; bad sector tell the world
+	pop	hl		; recover ^ to tran
+	pop	bc		; # of sectors to read
+	inc	hl
+	dec	c		; more sectors?
+	jp	nz,get1
+	ld	a,1
+	ld	(track),a
+	call	seeka		; next track
+	ld	a,4		; first sector to read on track 1
+get2:	out	(secp),a
+	call	read
+	call	nz,tellbad
+	in	a,(secp)
+	inc	a
+	cp	8		; last sector to read is 7
+	jr	nz,get2
+	ret
+
+putsys:	print	genmsg		; print message
+put0:	call	diskon		; turn on disk drive
+	call	home
+	xor	a
+	ld	(track),a	; on track 0
+	call	seekb		; drive select is done by seek
+	ld	hl,sysimag	; place to store system image
+	ld	(dmaadr),hl	; set dma address
+	ld	hl,tran		; sector xlate table
+	ld	c,10		; number of sectors to write
+put1:	ld	a,(hl)		; sector to read
+	push	bc		; # of sectors
+	push	hl		; save pos in tran
+	out	(secp),a	; set sector number
+	call	write		; write sector
+	call	nz,tellbad	; bad sector tell the world
+	pop	hl		; recover ^ to tran
+	pop	bc		; # of sectors to write
+	inc	hl
+	dec	c		; more sectors?
+	jp	nz,put1
+	ld	a,1
+	ld	(track),a
+	call	seekb		; next track
+	ld	a,4		; first sector to read on track 1
+put2:	out	(secp),a
+	call	write
+	call	nz,tellbad
+	in	a,(secp)
+	inc	a
+	cp	8		; last sector to read is 7
+	jr	nz,put2
+	ret
+
+vertrk:	ld	(rpterr),a	; report error flag
+	ld	a,tries2	; number of retries on format ver
+	ld	(tries),a
+	ld	hl,tran		; sector xlate table
+	ld	c,10		; number of sectors to read
+vert1:	ld	a,(hl)		; sector to read
+	push	bc		; # of sectors
+	push	hl		; save pos in tran
+	out	(secp),a	; set sector number
+	ld	hl,secbuf	; place to store sector
+	ld	(dmaadr),hl	; set dma address
+	call	read		; read sector
+	call	nz,vert2	; bad sector tell the world
+	pop	hl		; recover ^ to tran
+	pop	bc		; # of sectors to read
+	inc	hl
+	dec	c		; more sectors?
+	jp	nz,vert1
+	ld	a,tries1	; put retries back
+	ld	(tries),a
+	ld	a,true		; no errors
+	ret
+vert2:	ld	a,(rpterr)	; report error?
+	or	a
+	jp	nz,tellbad	; report error
+	pop	hl		; destroy return address
+	pop	hl		; clean up stack
+	pop	bc
+	ld	a,tries1	; restore error count
+	ld	(tries),a
+	ld	a,false		; verify error flag
+	ret
+
+verify:	prompt	msg1		; verify message
+        call    diskon          ; turn disk drives on
+        call    home            ; home both disk drives
+	xor	a		; zero track number
+vrtrk:	ld	(track),a	; set track number
+        call    seeka
+        print	back
+        call    tellt           ; tell the track number
+        ld      hl,buff         ; set up dma adrs
+        ld      (dmaadr),hl
+        xor     a               ; zero sector number
+vera:   out	(secp),a	; store current sector number
+        call	read		; read a physical sector to dmaadr
+	call	nz,tellbad	; error, tell track and sector
+	in	a,(secp)
+        inc     a
+        cp      10
+        jr      c,vera
+        call    seekb           ; seek track drive B
+        ld      hl,buffb        ; set up dma adrs for disk B
+        ld      (dmaadr),hl
+        xor     a
+verb:   out	(secp),a	; set up sector
+        call    read            ; read sector from B
+        call    nz,tellbad        ; tell any errors from read
+        in	a,(secp)	; next sector
+	inc	a
+	cp	maxsec		; end of track?
+	jr	c,verb  	; another sector yet to do
+        call    vrdata          ; go verify data on tracks
+vert:   ld	a,(track)	; next track
+	inc	a
+	cp	maxtrk		; end of disk?
+	jp	c,vrtrk
+	ret
+
+vrdata: ld      bc,0            ; reset error count
+        ld      (bytcnt),bc
+        ld      de,buff         ; starting adrs of disk A buffer
+        ld      (adrsa),de      ; store it
+        ld      hl,buffb        ; starting adrs of disk B buffer
+        ld      (adrsb),hl      ; store it
+vrdat:  ld      a,(hl)          ; get disk B data byte
+        ld      b,a             ; save it
+        ld      a,(de)          ; get disk A data
+        cp      b               ; is the data the same
+        call    nz,vrerr        ; no -- go tell about error
+        ld      bc,(bytcnt)     ; add one to loop counter
+        inc     bc
+        ld      (bytcnt),bc
+        ld      a,14H
+        cp      b               ; have 5120 bytes been verrified
+        ret     z               ; yes -- go read next track
+        ld      hl,(adrsb)
+        inc     hl              ; inc drive B adrs
+        ld      (adrsb),hl
+        ld      de,(adrsa)
+        inc     de              ; inc drive A adrs
+        ld      (adrsa),de
+        jr      vrdat           ; loop till done
+        
+vrerr:  print   crlf
+	print	datadrs		; tell which byte number is in error
+        ld      bc,(bytcnt)     ; get the count and display it
+        ld      c,b
+        call    outhex 
+        ld      bc,(bytcnt)
+        call    outhex
+        print   datis           ; drive B data is
+        ld      hl,(adrsb)
+        ld      a,(hl)          ; get data from drive B
+        ld      c,a             ; set up bad data from B
+        call    outhex
+        print   datsb
+        ld      de,(adrsa)
+        ld      a,(de)          ; get data from drive A
+        ld      c,a             ; data should be
+        call    outhex
+        print   crlf
+	ret
+
+blank:	prompt	msg2		; blank message
+	call	format		; make a blank diskette (format it)
+	cp	0FFH		; format abort?
+	ret	nz
+	xor	a
+	ld	(ccpcmd+1),a
+	call	putsys		; sysgen it
+	ret			; done
+
+blanka:	prompt	msg3		; format drive a
+	jp	forma
+
+blankb:	prompt	msg8		; format drive b
+	jp	format
+
+blankt:	prompt	msg9		; format a track on drive b
+	jp	single
+
+copy:	prompt	msg4
+	ld	a,true		; full disk copy
+	ld	(sysflg),a
+	ld	(fmtflg),a
+	jp	docopy
+
+image:	prompt	msg5
+	ld	a,true		; disk copy without sysgen
+	ld	(fmtflg),a
+	ld	a,false
+	ld	(sysflg),a
+	jr	docopy
+
+dup:	prompt	msg6
+	ld	a,false		; disk copy only, no format or sysgen
+	ld	(fmtflg),a
+	ld	(sysflg),a
+	jr	docopy
+
+sysgen:	prompt	msg7
+	call	getcmd
+	call	putsys		; write system
+	ret
+
+docopy:	call	diskon		; turn on disk drives
+	call	home		; home both disk drives
+	xor	a		; zero track number
+dotrk:	ld	(track),a	; set track number
+	call	seeka		; seek track drive a
+	print	back
+	call	tellt		; tell crt track number
+	; read track
+	ld	hl,buff		; start of buffer
+	ld	a,20		; read 20 sectors (read track twice)
+	call	tread		; do read op
+	ld	hl,buff		; check buffer
+	ld	de,buff+5120
+	call	cmpmem
+	call	nz,rmemf	; Read MEMory Fault
+	; write track
+	call	seekb		; select drive b and seek track
+	call	twrite		; write track and then read track
+	call	cmpmem		; check buffer
+	call	nz,wmemf	; Write MEMory Fault
+	ld	a,(track)	; next track
+	inc	a
+	cp	maxtrk		; end of disk?
+	jp	c,dotrk
+	ld	a,(sysflg)	; sysgen the finished diskette?
+	or	a
+	ret	z
+	call	put0		; sysgen in case user does not understand
+	print	dirmsg		; show user list of files
+	call	getdir
+	ld	hl,nodir	; special message if no files
+	call	z,prnt
+	call	lstdir		; list directory
+	call	getcmd		; get command line
+	call	putsys		; do sysgen
+	ret			; goto menu
+
+getdir:	call	diskon		; turn disk on, get directory of COM files
+	call	home
+	ld	a,1
+	ld	(track),a	; go to dir track
+	call	seeka
+	ld	hl,buff		; raw dir here
+	ld	(dmaadr),hl
+	ld	a,0		; init sector number
+gd1:	out	(secp),a
+	call	read		; read sector
+	in	a,(secp)	; bump to next sector
+	inc	a
+	cp	4
+	jr	nz,gd1		; another?
+	ld	de,dir		; formatted directory
+	ld	ix,buff		; search for valid COM files
+	ld	c,64		; number of dir entries
+gd2:	ld	a,(ix+0)	; user 0, non-deleted file?
+	or	a
+	jr	nz,gd3
+	ld	a,(ix+9)	; COM?
+	cp	'C'
+	jr	nz,gd3
+	ld	a,(ix+10)
+	cp	'O'
+	jr	nz,gd3
+	ld	a,(ix+11)
+	cp	'M'
+	jr	nz,gd3
+	ld	a,(ix+12)	; ext=0?
+	if	doubl
+		and 0FEH	; first ext?
+	    else
+		or a
+	    endif
+	jr	nz,gd3
+	push	ix		; good entry, move to dir
+	pop	hl		; hl^ to fcb
+	inc	hl		; past user #
+	push	bc		; save dir count
+	ld	bc,8		; number of character to move
+	ldir
+	ld	a,' '		; plus two spaces
+	ld	(de),a
+	inc	de
+	ld	(de),a
+	inc	de
+	pop	bc
+gd3:	ex	de,hl
+	ld	de,32		; bump ix to next fcb
+	add	ix,de
+	ex	de,hl
+	djnz	gd2
+	ld	a,'$'		; mark end of dir
+	ld	(de),a
+	ld	a,(buff)	; anything in buffer?
+	cp	'$'
+	ret
+
+getcmd:	print	cmdmsg		; tell user about command line
+	ld	de,ccpcmd	; get command line
+	ld	c,10		; bdos buffered console input
+	call	bdos
+	ld	a,(ccpcmd+1)	; make command line caps
+	ld	hl,ccpcmd+2
+	ld	b,a
+	or	a
+	jr	z,getcd3
+getcd1:	ld	a,(hl)
+	cp	'a'
+	jr	c,getcd2
+	cp	'{'
+	jr	nc,getcd2
+	res	5,a
+	ld	(hl),a
+getcd2:	inc	hl
+	djnz	getcd1
+getcd3:	xor	a		; flag end of command with 0
+	ld	(hl),a
+	ret
+
+lstdir:	print	buffb		; dump dir to console, it is formatted to
+	print	crlf		; line up ok
+	print	crlf
+	ret
+
+tread:	ld	(dmaadr),hl	; read sectors a=# of sectors to read
+	ld	(count),a	; hl is place to stuf data
+	call	rdnext		; find next sector under head
+	ld	(first),hl	; pos in tran table
+trd:	ld	a,(hl)		; sector to read
+	push	hl		; save pos in tran
+	out	(secp),a	; set sector number
+	call	read		; read sector
+	call	nz,tellbad	; bad sector tell the world
+	pop	hl		; recover ^ to tran
+	inc	hl
+	ld	a,(count)	; more sectors?
+	dec	a
+	ld	(count),a
+	jp	nz,trd
+	ret			; done
+
+twrite:	ld	a,(fmtflg)	; format the track before write?
+	jmpif	false,twrt0
+	ld	a,(track)	; format track
+	ld	c,a
+	call	maktrk
+	call	frmtrk
+twrt0:	ld	a,10		; write ten sectors then read them
+	ld	(count),a
+	call	rdnext		; next sector under head
+	push	hl
+	ld	hl,(first)	; compute location of data in buffer
+	ld	de,buff
+	ld	bc,512
+twrt1:	cp	(hl)		; search tran for a match of next sector
+	jp	z,twrt2		; start search from (first)
+	ex	de,hl		; not found
+	add	hl,bc		; bump mem pointer one sectors worth
+	ex	de,hl
+	inc	hl		; next entry in tran
+	jp	twrt1		; cont search
+twrt2:	pop	hl		; recover pos in tran
+	push	de		; place to start
+	ld	(dmaadr),de
+	ld	(first),hl
+twrt3:	ld	a,(hl)		; first sector to write
+	push	hl		; save loc in tran table
+	out	(secp),a	; set sector number
+	call	write		; write sector
+	call	nz,tellbad	; write fault tell the world
+	pop	hl		; recover loc in tran
+	inc	hl		; next sector
+	ld	a,(count)	; another?
+	dec	a
+	ld	(count),a
+	jp	nz,twrt3	; do another if nz
+	ld	de,(dmaadr)	; save position in buff of read
+	push	de
+	ld	a,10		; set count
+	ld	(count),a
+				; read sectors from track (read after write)
+twrt4:	ld	a,(hl)		; sector to read
+	push	hl		; save pos in tran
+	out	(secp),a	; set sector number
+	call	read		; read sector
+	call	nz,tellbad	; bad sector tell the world
+	pop	hl		; recover ^ to tran
+	inc	hl
+	ld	a,(count)	; more sectors?
+	dec	a
+	ld	(count),a
+	jp	nz,twrt4
+	pop	 de		; location of read track image
+	pop	hl		; location of write track image
+	ret
+
+read:	ld	de,rdmask*256+rdcmd
+	jr	action
+write:	ld	de,wrtmask*256+wrtcmd
+	;
+action:	push	de		; save command
+	call	diskon		; disk drive on
+	if	doubl
+		in	a,(bitport)
+		bit	2,a
+		jr	z,secok
+		in	a,(secp)
+		add	a,10
+		out	(secp),a
+secok:		endif
+	pop	de
+	ld	a,(tries)	; re-tries on bad sector
+	ld	l,a
+	push	hl
+	ld	hl,(dmaadr)	; address of disk i/o
+alp:	ld	bc,data		; b=0, c=port #
+	ld	a,e
+	cp	wrtcmd		; write op?
+	jr	z,wrt
+	;
+	out	(cmnd),a	; read loop
+rl1:	halt			; read in first 256 bytes
+	ini
+	jp	nz,rl1
+rl2:	halt			; read in second 256 bytes (256+256)=512
+	ini
+	jp	nz,rl2
+	jr	done
+	;
+wrt:	out	(cmnd),a	; write loop
+wrt1:	halt			; write first 256 bytes
+	outi
+	jp	nz,wrt1
+wrt2:	halt			; write second 256 bytes
+	outi
+	jp	nz,wrt2
+	;
+done:	ld	(dmaadr),hl	; save new dma address (auto inc on rd/wrt)
+	call	busy		; wait for crc
+	and	d		; status mask
+	pop	hl		; error re-try count
+	jr	z,opok		; no error
+	dec	l		; down error count
+	jr	z,error		; max error count if Z
+	push	hl
+	ld	hl,(dmaadr)	; correct dma address
+	ld	bc,512
+	or	a
+	sbc	hl,bc
+	jr	alp
+error:	if	doubl
+		in	a,(bitport)	; check side bit
+		bit	2,a
+		jr	z,op1
+		in	a,(secp)	; if side 1 adjust sector #
+		sub	10
+		out	(secp),a
+op1:		endif
+	ld	a,0FFH
+	or	a
+	ret			; ret non-zero (error)
+opok:	if	doubl
+		in	a,(bitport)	; check side bit
+		bit	2,a
+		jr	z,op2
+		in	a,(secp)	; if side 1 adjust sector #
+		sub	10
+		out	(secp),a
+op2:		endif
+	xor	a
+	ret
+	
+rdnext:	call	diskon
+	ld	a,rdadr		; read address command
+	ld	bc, 0600H+data	; b=# of bytes to read, c=port #
+	ld	hl, adrbuf
+	out	(cmnd),a	; issue command
+rn1:	halt			; wait for drq
+	ini
+	jp	nz, rn1
+	call	busy		; check status
+	and	adrmsk		; status bit mask
+	ld	hl,tran		; default return if error
+	ld	a,(hl)
+	ret	nz
+	if	doubl
+		in	a,(bitport)	; check for side 1
+		bit	2,a
+		ld	a,(secnum)	; need to adjust?
+		jr	z,rn2
+		sub	10
+rn2:        else
+		ld	a,(secnum)
+		endif
+	cpir			; search tran table
+	ld	a,(hl)		; next sector in next entry in tran table
+	ret			; a=sector#  hl^into tran
+
+tran:	defb	0, 8, 3, 6	; un-skew table
+	defb	1, 9, 4, 7
+	defb	2, 5
+	defb	0, 8, 3, 6	; un-skew table
+	defb	1, 9, 4, 7
+	defb	2, 5
+	defb	0, 8, 3, 6	; un-skew table
+	defb	1, 9, 4, 7
+	defb	2, 5
+
+seeka:	ld	b,01H		; select disk mask
+	jr	seekx
+	;
+seekb:	ld	b,02H
+	in	a,(trkp)	; drive b is always one behind
+	or	a		; except on track 00
+	jr	z,seekx
+	if	doubl
+		ld	a,(track)	; only on even track #s
+		bit	0,a
+		jr	nz,seekx
+		in	a,(trkp)
+		endif
+	dec	a		; back one
+	out	(trkp),a
+	;
+seekx:	push	bc
+	call	diskon		; disk drive on
+	pop	bc
+	ld	a,ficmd		; force int
+	out	(cmnd),a
+	in	a,(bitport)	; select disk
+	and	0FCH
+	or	b
+	out	(bitport),a	; done
+	ld	a,(track)	; now seek desired track
+	if	doubl
+	srl	a		; carry=lsb
+	ld	b,a		; save track number
+	in	a,(bitport)	; set side bit
+	set	2,a
+	jr	c,sk0
+	res	2,a
+sk0:	out	(bitport),a
+	ld	a,b		; recover track number
+	endif
+	out	(data),a
+	ld	a,seekcmd
+	out	(cmnd),a	; issue command
+	ld	b,15		; delay for head
+skl1:	ld	de,1670
+skl2:	dec	de
+	ld	a,d
+	or	e
+	jp	nz,skl2
+	djnz	skl1
+
+busy:	halt			; wait for command done
+bsy:	in	a,(status)	; busy? (may be drq not int)
+	bit	0,a
+	jr	nz,bsy
+	ret			; done
+
+home:	call	diskon
+	in	a,(bitport)	; select drive B
+	if	doubl
+		and	0F8H
+	    else
+		and	0FCH
+	    endif
+	push	af		; save
+	set	1,a
+	out	(bitport),a
+	ld	a,rstcmd	; home drive B
+	out	(cmnd),a
+	call	busy		; wait for done
+	pop	af
+	set	0,a		; select drive A
+	out	(bitport),a
+	ld	a,rstcmd	; home drive A
+	out	(cmnd),a
+	call	busy		; wait for done
+	ret
+
+diskon:	in	a,(bitport)	; turn on disk drive
+	bit	6,a		; is motor on?
+	ret	z
+	res	6,a
+	out	(bitport),a
+	ld	b,50		; delay for motor up to speed
+don1:	ld	de,1670
+don2:	dec	de
+	ld	a,d
+	or	e
+	jp	nz,don2
+	djnz	don1
+	ret
+
+cmpmem:	ld	bc,5120		; len of track image
+cmplp:	ld	a,(de)		; cmp (hl) with (de)
+	cp	(hl)
+	ret	nz		; nz=fault
+	inc	hl
+	inc	de
+	dec	bc
+	ld	a,b
+	or	c
+	jp	nz,cmplp	; more to do?
+	ret
+
+outdec:	push	bc		; save number in c
+	ld	a,c		; decimal print the number in c
+	ld	e,'0'		; e hold decimal digit
+hund:	sub	100		; any hundreds digits?
+	jr	c,tens
+	inc	e		; bump hundreds digit
+	jr	hund
+tens:	add	a,100		; put back 100
+	push	af		; save number
+	ld	a,e		; leading zero digit?
+	cp	'0'
+	jr	z,ten1
+	ld	c,2
+	call	bdos		; write digit
+ten1:	pop	af		; recover digit
+	ld	e,'0'		; tens digit
+ten2:	sub	10
+	jr	c,ones
+	inc	e		; bump tens digit
+	jr	ten2
+ones:	add	a,10+'0'
+	push	af		; save number, print digit
+	ld	c,2
+	call	bdos		; tens digit
+	pop	af
+	ld	e,a
+	ld	c,2
+	call	bdos		; ones digit
+	pop	bc		; restore number to c
+	ret			; done
+
+outhex: push    de              ; save incomming regs
+        push    bc
+        ld      a,c             ; get data to be output
+        and     0fh             ; mask it for lsb nibble
+        ld      b,a             ; save it
+        push    bc
+        rrc     c               ; adjust msb nibble
+        rrc     c
+        rrc     c
+        rrc     c
+        ld      a,c
+        and     0fh             ; mask it
+        call    outcrt          ; output msb to crt
+        pop     bc
+        ld      a,b
+        call    outcrt          ; output lsb to crt
+        pop     bc              ; restore registers
+        pop     de
+        ret
+outcrt: cp      0ah             ; is it more than 9
+        jp      c,outc          ; no
+        add     a,37h           ; yes add in alpha displacement
+outcr:  ld      e,a             ; set up for output to crt
+        ld      c,2
+        call    bdos
+        ret
+outc:   add     a,30h           ; add in numerial displacement
+        jr      outcr
+
+tellt:	print	trkmsg		; tell track number
+	ld	bc,(track)
+	call	outdec		; print track number
+	ret
+
+tella:	print	back		; bad sector on drive a
+	print	drva		; "DRIVE A "
+telerr:	call	tellt		; "TRACK XX"
+	print	secmsg		; " SECTOR "
+	in	a,(secp)	; get sector number
+	ld	c,a
+	call	outdec		; "XX"
+	print	badmsg
+	print	crlf
+	ld	a,(msgflg)	; out after first error?
+	jmpif	true,stop
+	call	tellt
+	ret
+
+tellbad:in	a,(bitport)
+	bit	0,a
+	jr	z,tellb
+	jr	tella
+
+tellb:	print	back		; bad sector on drive b
+	print	drvb
+	jr	telerr		; common code
+
+rmemf:	print	back		; Read MEMory Fault
+	print	drva		; "DRIVE A TRACK XX MEMORY BUFFER FAULT"
+memf:	call	tellt
+	print	bufmsg
+	print	crlf
+	ld	a,(msgflg)	; out after first error?
+	jmpif	true,stop
+	call	tellt
+	ret
+
+wmemf:	print	back		; Write MEMory Fault
+	print	drvb
+	jr	memf		; common code
+
+stop:	print	msg10		; stop till user types a ESC
+stop1:	input
+	cp	1BH
+	jp	z,ask
+	jr	stop1
+
+prnt:	ld	a,(hl)		; end of string to print
+	cp	'$'
+	ret	z
+	push	hl		; print character
+	ld	c,6
+	ld	e,a
+	call	bdos
+	pop	hl		; restore pointer to string
+	inc	hl
+	jr	prnt
+
+bdos:	call	cpm		; do bdos call then check drive motor
+	ld	c,6		; check console status
+	ld	e,0FFH
+	call	cpm
+	or	a		; a=0 => no key press
+	ret	z
+	cp	1BH		; key press, escape?
+	jp	z,ask
+	call	diskon		; keep drive on
+	ret
+
+	.xlist
+	include	COPY.MSG
+	.list
+
+sysflg:	defb	true		; sysgen put on copy flag
+fmtflg:	defb	true		; format on copy flag
+	defw	0		; because link80 tends to loose last byte
+
+	dseg
+dmaadr:	defs	2		; dma pointer
+msgflg:	defs	1		; display one or more error messages
+track:	defs	1		; current track
+trkcnt	equ	track
+first:	defs	2		; pointer into tran
+count:	defs	1		; number of sector in an operation
+tries:	defs	1		; number of retries by read sector
+rpterr:	defs	1		; verify report error flag T/F to display err
+bytcnt:	defs	2		; count for verify A&B same
+adrsa:	defs	2		; address of verify buffer disk a
+adrsb:	defs	2		; address of verify buffer disk b
+adrbuf:	defs	6		; read address buffer
+	defs	64		; 32 stack levels
+stack	equ	$
+secnum	equ	adrbuf+2
+buff:	defs	16000		; track buffer
+buffb	equ	buff+(10*512)
+dir	equ	buffb		; directory of COM files
+sysimag:defs	7200		; place to store cp/m image
+ccpcmd	equ	sysimag+86H
+secbuf:	defs	512
+	end
+

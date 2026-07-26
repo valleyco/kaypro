@@ -1,0 +1,137 @@
+
+signon:	defb	1AH,lf
+	defb	'KAYPRO Double density diskette copy program.     '
+	if	doubl
+		defb	'Double sided V1.5'
+	    else
+		defb	'Single sided V1.5'
+	    endif
+	defb	cr,lf,lf,'$'
+menu1:	defb	cr,lf,lf
+	defb	'C  COPY   This option is used to copy a diskette in drive A to a diskette',cr,lf
+	defb	'          in drive B.  The diskette in drive B will be formatted (erased)',cr,lf
+	defb	'          during the copy operation.  At the end of the operation, a copy',cr,lf
+	defb	'          of CP/M will be placed on the diskette in drive B.',cr,lf
+	defb	cr,lf
+	defb	'B  BLANK  This option is used to make a blank diskette.   The diskette in',cr,lf
+	defb	'          drive B will be formatted (erased); then a copy of CP/M will be',cr,lf
+	defb	'          placed on the diskette.',cr,lf
+	defb	cr,lf
+	defb	'O  OTHER  This is a list of other options for use by  programmers.  These',cr,lf
+	defb	'          options produce more complex error messages and assume  techni-',cr,lf
+	defb	'          cal expertise.',cr,lf
+	defb	cr,lf
+	defb	'E  EXIT   To get out of this program.  Be sure a diskette with CP/M on it',cr,lf
+	defb	'          is in drive A!',cr,lf
+	defb	lf
+	defb	'Please enter selection.  Press C, B, O, or E ==>','$'
+
+menu2:	defb	1AH,cr,lf,lf
+	defb	'Use the "ESC" key to terminate an operation in progress.',cr,lf
+	defb 	'Note:  These options do not terminate execution on the first encountered error.',cr,lf,lf
+	defb	'C  COPY        Format B, copy, verify, and sysgen.',cr,lf
+	defb	'B  BLANK       Make a blank diskette {format, sysgen}.',cr,lf
+	defb	'I  Image       Format B, copy, and verify.',cr,lf
+	defb	'D  Duplicate   Copy and verify.',cr,lf
+	defb	'V  Verify      Verify that A and B are the same.',cr,lf
+	defb	'S  Sysgen      Write system image only.',cr,lf
+	defb	'F  Format B    Format (erase) the diskette in drive B.',cr,lf
+	defb	'X  Format A    Format (erase) the diskette in drive A.',cr,lf
+	defb	'T  Track       Format a single track on drive B.',cr,lf
+	defb	'R  Return      Return to first menu.',cr,lf
+	defb	'E  Exit        BEFORE pressing E, place a system diskette in A.',cr,lf
+	defb		lf
+	defb	'Selection (C,B,I,D,V,S,F,T,E) ==>','$'
+
+genmsg:	defb	cr,lf,'Writing CP/M to the diskette in drive B.',cr,lf,'$'
+
+crlf:	defb	cr,lf,'$'
+trkmsg:	defb	'Track ','$'
+secmsg:	defb	' Sector ','$'
+drva:	defb	'Drive A ','$'
+drvb:	defb	'Drive B ','$'
+badmsg:	defb	' {BAD}','$'
+bufmsg:	defb	' Memory buffer cmpr err','$'
+back:	defb	cr,'$'
+datadrs: defb   'Drive B byte ','$'
+datis:  defb    ' data is ','$'
+datsb:  defb    ' should be ','$'
+clear:	defb	1ah,'$'
+
+msg1:	defb	lf,lf
+	defb	'Verify that the diskette in drive A is the same as the diskette in drive B.',cr,lf,lf
+	defb	'Push RETURN to start, any other key to abort.','$'
+
+msg2:	defb	lf,lf
+	defb	'Make a blank diskette.',cr,lf,lf
+	defb	'This  option  will prepare a new or previously-used diskette  to  receive',cr,lf
+	defb	'data  by ERASING WHATEVER DATA IS ON IT,  formatting it into  tracks  and',cr,lf
+	defb	'sectors, and putting a copy of CP/M on a portion of the diskette reserved',cr,lf
+	defb	'for it. During this process, the diskette will be checked for errors.'
+defb cr,lf,lf
+	defb	'To use this option:',cr,lf
+	defb	'1.  Place into drive B a diskette which you want to prepare to receive data.',cr,lf
+	defb	'2.  Press the RETURN key.',cr,lf,lf
+	defb	'All information on the diskette will be erased,  and the diskette will be',cr,lf
+	defb	'prepared to receive data.',cr,lf,lf
+	defb	'Push RETURN to start, any other key to abort.','$'
+
+msg3:	defb	lf,lf
+	defb	'If you continue you will format the diskette in drive A!',cr,lf,lf
+	defb	'Push RETURN to start, any other key to abort.','$'
+
+msg4:	defb	lf,lf
+	defb	'Copy the diskette in drive A to drive B.',cr,lf,lf
+	defb	'This  option  is used to copy diskettes.  During the copy  operation  the',cr,lf
+	defb	'diskette in drive B is checked for errors and the copy is verified.',cr,lf,lf
+	defb	'To use this option:',cr,lf
+	defb	'1.   Place the original (master or source) diskette into drive A.',cr,lf
+	defb	'2.   Select  either a new diskette or a used diskette that may be  erased',cr,lf
+	defb	'     (i.e.   have  the data on the diskette in drive A recorded over it).',cr,lf
+	defb	'     Place this diskette into drive B.',cr,lf,lf
+	defb	'When you have placed the diskettes into the drives,  press the RETURN key',cr,lf
+	defb	'to start the copy operation.  You may return to the main menu by pressing',cr,lf
+	defb	'any other key.','$'
+
+msg5:	defb	lf,lf
+	defb	'Copy a diskette.  Do Format B, Copy, and Verify.',cr,lf,lf
+	defb	'Push RETURN to start, any other key to abort.','$'
+
+msg6:	defb	lf,lf
+	defb	'Copy a diskette.  Do Copy and Verify.',cr,lf,lf
+	defb	'Push RETURN to start, any other key to abort.','$'
+
+msg7:	defb	lf,lf
+	defb	'Write the CP/M image in RAM onto the diskette in drive B',cr,lf,lf
+	defb	'Push RETURN to start, any other key to abort.','$'
+
+msg8:	defb	lf,lf
+	defb	'Format the diskette in drive B.',cr,lf,lf
+	defb	'Push RETURN to start, any other key to abort.','$'
+
+msg9:	defb	lf,lf
+	defb	'Format a single track on the diskette in drive B.  You will be asked for',cr,lf
+	defb	'the track number if you continue.',cr,lf
+	defb	'Push RETURN to start, any other key to abort.','$'
+
+msg10:	defb	cr,lf,07H
+	defb	'You have had an error, push the ESC key to exit.'
+	defb	cr,lf,'$'
+
+dirmsg:	defb	1AH
+	defb	'     Under normal operation,  when you push the reset button,  you see an',cr,lf
+	defb	'A> prompt. If you would like to bypass the A> prompt, type in the name of',cr,lf
+	defb	'the program you want to use.  A list of programs contained on the disk is',cr,lf
+	defb	'given below.  Some names are abbreviated, because a name may have no more',cr,lf
+	defb	'than 8 characters.  If there is a master control program, such as MENU or',cr,lf
+	defb	'HELLO,  you may want to select it.  If you want one of these programs  to',cr,lf
+	defb	'execute when you push the RESET button,  just enter its name when you are',cr,lf
+	defb	'asked for a command line.',cr,lf,lf,'$'
+
+nodir:	defb	'       << There are no programms that can be run on this diskette >>',cr,lf,lf,'$'
+
+cmdmsg:	defb	'Please  enter an initial command line (name).  This command line  is  not',cr,lf
+	defb	'checked  to  ensure it is correct.  This allows greater  flexibility  for',cr,lf
+	defb	'experienced users who understand that this is a CCP command line.  If you',cr,lf
+	defb	'push RETURN only you will get the normal A> prompt. ==>','$'
+
