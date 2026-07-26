@@ -48,6 +48,7 @@ typedef struct disk_image {
 
 static bool display_cleared;
 static bool termios_saved;
+static bool alt_screen_active;
 static bool quit_requested;
 static bool prev_was_cr;
 static struct termios termios_original;
@@ -70,6 +71,11 @@ static void posix_restore_terminal(void) {
   if (termios_saved) {
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &termios_original);
     termios_saved = false;
+  }
+  /* Leave the alternate screen so the pre-emulator scrollback/content returns. */
+  if (alt_screen_active) {
+    fputs("\033[?1049l", stdout);
+    alt_screen_active = false;
   }
   fputs("\033[0m\033[?25h", stdout);
   fflush(stdout);
@@ -94,13 +100,24 @@ static void posix_setup_terminal(void) {
   atexit(posix_restore_terminal);
 
   struct termios raw = termios_original;
-  raw.c_lflag &= (tcflag_t) ~(ICANON | ECHO | ISIG);
-  raw.c_iflag &= (tcflag_t)~IXON;
+  /* IEXTEN must go too: on BSD/macOS, Ctrl-O is VDISCARD and never reaches us. */
+  raw.c_lflag &= (tcflag_t) ~(ICANON | ECHO | ISIG | IEXTEN);
+  raw.c_iflag &= (tcflag_t)~(IXON | ICRNL | INLCR | IGNCR);
   /* Non-blocking-style read without O_NONBLOCK: return immediately if empty. */
   raw.c_cc[VMIN] = 0;
   raw.c_cc[VTIME] = 0;
+#ifdef VDISCARD
+  raw.c_cc[VDISCARD] = _POSIX_VDISABLE;
+#endif
   tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
   posix_ensure_stdout_blocking();
+
+  /* Paint on the alternate screen; exiting restores the previous display. */
+  if (isatty(STDOUT_FILENO)) {
+    fputs("\033[?1049h", stdout);
+    fflush(stdout);
+    alt_screen_active = true;
+  }
 }
 
 static void posix_console_write(void *ctx, const uint8_t *data, size_t len) {

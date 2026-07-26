@@ -9,6 +9,10 @@
 #include <string.h>
 #include <unistd.h>
 
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
+
 void kaypro_run_opts_init(kaypro_run_opts_t *opts) {
   if (!opts) return;
   memset(opts, 0, sizeof(*opts));
@@ -32,9 +36,24 @@ bool kaypro_exe_dir(char *buf, size_t buflen) {
   if (!buf || buflen < 2) return false;
 
   char path[PATH_MAX];
+
+#if defined(__APPLE__)
+  /* macOS has no /proc/self/exe; resolve the running binary path. */
+  uint32_t size = (uint32_t)sizeof(path);
+  if (_NSGetExecutablePath(path, &size) != 0) return false;
+  char resolved[PATH_MAX];
+  if (realpath(path, resolved) != NULL) {
+    if (strlen(resolved) + 1 > sizeof(path)) return false;
+    memcpy(path, resolved, strlen(resolved) + 1);
+  }
+#elif defined(__linux__)
   ssize_t n = readlink("/proc/self/exe", path, sizeof(path) - 1);
   if (n <= 0) return false;
   path[n] = '\0';
+#else
+  (void)path;
+  return false;
+#endif
 
   char *slash = strrchr(path, '/');
   if (!slash) return false;
